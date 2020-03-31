@@ -508,6 +508,18 @@ Resources:
                             "es:ESHttpHead"
                           ],
                           "Resource": "${ElasticsearchService.Arn}/*"
+                      },
+                      {
+                              "Sid": "WriteObjects",
+                              "Effect": "Allow",
+                              "Action": [
+                                  "s3:ListBucket",
+                                  "s3:PutObject"
+                              ],
+                              "Resource": [
+                                  "arn:aws:s3:::ka-app-ramvasi",
+                                  "arn:aws:s3:::ka-app-ramvasi/*"
+                              ]
                       }
                   ]
               }
