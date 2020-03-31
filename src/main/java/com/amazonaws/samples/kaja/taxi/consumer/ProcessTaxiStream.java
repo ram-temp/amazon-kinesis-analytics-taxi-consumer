@@ -25,18 +25,23 @@ import com.amazonaws.samples.kaja.taxi.consumer.events.kinesis.TripEvent;
 import com.amazonaws.samples.kaja.taxi.consumer.operators.*;
 import com.amazonaws.samples.kaja.taxi.consumer.utils.GeoUtils;
 import com.amazonaws.samples.kaja.taxi.consumer.utils.ParameterToolUtils;
+import com.amazonaws.services.kinesisanalytics.flink.connectors.producer.FlinkKinesisFirehoseProducer;
 import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.flink.api.common.serialization.SimpleStringEncoder;
+import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.fs.shaded.hadoop3.org.apache.hadoop.metrics2.sink.RollingFileSystemSink;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
+import org.apache.flink.streaming.api.functions.sink.filesystem.rollingpolicies.DefaultRollingPolicy;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
@@ -54,16 +59,39 @@ public class ProcessTaxiStream {
 
   private static StreamingFileSink<String> createS3SinkFromStaticConfig() {
 
+    /*
     final StreamingFileSink<String> sink = StreamingFileSink
             .forRowFormat(new Path(s3SinkPath), new SimpleStringEncoder<String>("UTF-8"))
             .build();
+    */
+    final StreamingFileSink<String> sink = StreamingFileSink
+            .forRowFormat(new Path(s3SinkPath), new SimpleStringEncoder<String>("UTF-8"))
+            .withRollingPolicy( DefaultRollingPolicy.create().
+                            withInactivityInterval(TimeUnit.MINUTES.toMillis(2)).
+                            withMaxPartSize(1024*1024*1024).
+                            withRolloverInterval( TimeUnit.MINUTES.toMillis(10)).build()).
+                    build();
+                    //new DefaultRollingPolicy(1024 * 1024 * 1024, TimeUnit.MINUTES.toMillis(15),);
+
     return sink;
   }
 
+  private static FlinkKinesisFirehoseProducer<String> createFirehoseSinkFromStaticConfig() {
+    /*
+     * com.amazonaws.services.kinesisanalytics.flink.connectors.config.ProducerConfigConstants
+     * lists of all of the properties that firehose sink can be configured with.
+     */
+
+    Properties outputProperties = new Properties();
+    outputProperties.setProperty(ConsumerConfigConstants.AWS_REGION, "us-east-1");
+    String outputDeliveryStreamName = "firehose-s3-test-buffering-DeliveryStream-Q5P2ENKGCBGJ";
+    FlinkKinesisFirehoseProducer<String> sink =
+            new FlinkKinesisFirehoseProducer<>(outputDeliveryStreamName, new SimpleStringSchema(), outputProperties);
+    return sink;
+  }
 
   public static void main(String[] args) throws Exception {
     StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
 
     ParameterTool parameter;
 
@@ -151,7 +179,7 @@ public class ProcessTaxiStream {
 
       pickupCounts.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "pickup_count", "pickup_count"));
       //tripDurations.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "trip_duration", "trip_duration"));
-      tripDurations.map(AverageTripDuration::toString).addSink(createS3SinkFromStaticConfig());
+      tripDurations.map(AverageTripDuration::toString).addSink(createFirehoseSinkFromStaticConfig());
     }
 
 
