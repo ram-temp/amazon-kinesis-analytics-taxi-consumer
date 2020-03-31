@@ -58,6 +58,12 @@
         </dependency>
 
         <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-kinesisanalytics-flink</artifactId>
+            <version>${aws.kda.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>vc.inreach.aws</groupId>
             <artifactId>aws-signing-request-interceptor</artifactId>
             <version>0.0.22</version>

@@ -28,11 +28,15 @@ import com.amazonaws.samples.kaja.taxi.consumer.utils.ParameterToolUtils;
 import com.amazonaws.services.kinesisanalytics.runtime.KinesisAnalyticsRuntime;
 import java.util.Map;
 import java.util.Properties;
+
+import org.apache.flink.api.common.serialization.SimpleStringEncoder;
 import org.apache.flink.api.java.utils.ParameterTool;
+import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.LocalStreamEnvironment;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.sink.filesystem.StreamingFileSink;
 import org.apache.flink.streaming.api.windowing.time.Time;
 import org.apache.flink.streaming.connectors.kinesis.FlinkKinesisConsumer;
 import org.apache.flink.streaming.connectors.kinesis.config.AWSConfigConstants;
@@ -46,6 +50,15 @@ public class ProcessTaxiStream {
 
   private static final String DEFAULT_STREAM_NAME = "streaming-analytics-workshop";
   private static final String DEFAULT_REGION_NAME = Regions.getCurrentRegion()==null ? "eu-west-1" : Regions.getCurrentRegion().getName();
+  private static final String s3SinkPath = "s3a://ka-app-ramvasi/data";
+
+  private static StreamingFileSink<String> createS3SinkFromStaticConfig() {
+
+    final StreamingFileSink<String> sink = StreamingFileSink
+            .forRowFormat(new Path(s3SinkPath), new SimpleStringEncoder<String>("UTF-8"))
+            .build();
+    return sink;
+  }
 
 
   public static void main(String[] args) throws Exception {
@@ -98,6 +111,7 @@ public class ProcessTaxiStream {
     ));
 
 
+
     DataStream<TripEvent> trips = kinesisStream
         //extract watermarks from watermark events
         .assignTimestampsAndWatermarks(new TimestampAssigner())
@@ -136,7 +150,8 @@ public class ProcessTaxiStream {
       }
 
       pickupCounts.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "pickup_count", "pickup_count"));
-      tripDurations.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "trip_duration", "trip_duration"));
+      //tripDurations.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "trip_duration", "trip_duration"));
+      tripDurations.map(AverageTripDuration::toString).addSink(createS3SinkFromStaticConfig());
     }
 
 
