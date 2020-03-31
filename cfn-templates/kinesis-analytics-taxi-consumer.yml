@@ -39,7 +39,7 @@ Resources:
   KinesisReplayBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://github.com/ram-temp/amazon-kinesis-analytics-taxi-consumer/blob/master/cfn-templates/kinesis-replay-build-pipeline.yml
+      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-replay-build-pipeline.yml
       Parameters:
         ExternalArtifactBucket: !Ref ArtifactBucket
         Release: release-0.1.0
@@ -47,21 +47,21 @@ Resources:
   FlinkKinesisConnectorBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://github.com/ram-temp/amazon-kinesis-analytics-taxi-consumer/blob/master/cfn-templates/flink-kinesis-connector-build-pipeline.yml
+      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/flink-kinesis-connector-build-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
   TaxiConsumerBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://github.com/ram-temp/amazon-kinesis-analytics-taxi-consumer/blob/master/cfn-templates/kinesis-analytics-taxi-consumer-build-pipeline.yml
+      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-analytics-taxi-consumer-build-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
   TaxiConsumerInfrastructure:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://github.com/ram-temp/amazon-kinesis-analytics-taxi-consumer/blob/master/cfn-templates/kinesis-analytics-taxi-consumer-infrastructure.yml
+      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-analytics-taxi-consumer-infrastructure.yml
       Parameters:
         KinesisReplayCopyCommand: !GetAtt KinesisReplayBuildStack.Outputs.KinesisReplayCopyCommand
         FlinkApplicationS3BucketArn: !GetAtt ArtifactBucket.Arn
