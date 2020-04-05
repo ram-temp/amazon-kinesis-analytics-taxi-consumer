@@ -54,37 +54,12 @@ public class ProcessTaxiStream {
   private static final Logger LOG = LoggerFactory.getLogger(ProcessTaxiStream.class);
 
   private static final String DEFAULT_STREAM_NAME = "streaming-analytics-workshop";
-  private static final String DEFAULT_REGION_NAME = Regions.getCurrentRegion()==null ? "eu-west-1" : Regions.getCurrentRegion().getName();
-  private static final String s3SinkPath = "s3a://ka-app-ramvasi/data";
+  private static final String DEFAULT_REGION_NAME = Regions.getCurrentRegion()==null ? "eu-east-1" : Regions.getCurrentRegion().getName();
 
-  private static StreamingFileSink<String> createS3SinkFromStaticConfig() {
-
-    /*
-    final StreamingFileSink<String> sink = StreamingFileSink
-            .forRowFormat(new Path(s3SinkPath), new SimpleStringEncoder<String>("UTF-8"))
-            .build();
-    */
-    final StreamingFileSink<String> sink = StreamingFileSink
-            .forRowFormat(new Path(s3SinkPath), new SimpleStringEncoder<String>("UTF-8"))
-            .withRollingPolicy( DefaultRollingPolicy.create().
-                            withInactivityInterval(TimeUnit.MINUTES.toMillis(2)).
-                            withMaxPartSize(1024*1024*1024).
-                            withRolloverInterval( TimeUnit.MINUTES.toMillis(10)).build()).
-                    build();
-                    //new DefaultRollingPolicy(1024 * 1024 * 1024, TimeUnit.MINUTES.toMillis(15),);
-
-    return sink;
-  }
-
-  private static FlinkKinesisFirehoseProducer<String> createFirehoseSinkFromStaticConfig() {
-    /*
-     * com.amazonaws.services.kinesisanalytics.flink.connectors.config.ProducerConfigConstants
-     * lists of all of the properties that firehose sink can be configured with.
-     */
-
+  private static FlinkKinesisFirehoseProducer<String> createFirehoseSinkFromStaticConfig(final String outputDeliveryStreamName) {
     Properties outputProperties = new Properties();
     outputProperties.setProperty(ConsumerConfigConstants.AWS_REGION, "us-east-1");
-    String outputDeliveryStreamName = "firehose-s3-test-buffering-DeliveryStream-Q5P2ENKGCBGJ";
+    //String outputDeliveryStreamName = "firehose-s3-test-buffering-DeliveryStream-Q5P2ENKGCBGJ";
     FlinkKinesisFirehoseProducer<String> sink =
             new FlinkKinesisFirehoseProducer<>(outputDeliveryStreamName, new SimpleStringSchema(), outputProperties);
     return sink;
@@ -168,22 +143,16 @@ public class ProcessTaxiStream {
         .apply(new TripDurationToAverageTripDuration());
 
 
-    if (parameter.has("ElasticsearchEndpoint")) {
-      String elasticsearchEndpoint = parameter.get("ElasticsearchEndpoint");
-      final String region = parameter.get("Region", DEFAULT_REGION_NAME);
+    if (parameter.has("OutputFirehoseStream")) {
 
-      //remove trailling /
-      if (elasticsearchEndpoint.endsWith(("/"))) {
-        elasticsearchEndpoint = elasticsearchEndpoint.substring(0, elasticsearchEndpoint.length()-1);
-      }
-
-      pickupCounts.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "pickup_count", "pickup_count"));
-      //tripDurations.addSink(AmazonElasticsearchSink.buildElasticsearchSink(elasticsearchEndpoint, region, "trip_duration", "trip_duration"));
-      tripDurations.map(AverageTripDuration::toString).addSink(createFirehoseSinkFromStaticConfig());
+      final String outputFirehoseStream = parameter.get("OutputFirehoseStream");
+      //tripDurations.map(AverageTripDuration::toString).addSink(createFirehoseSinkFromStaticConfig(outputFirehoseStream));
+      pickupCounts.map(PickupCount::toString).addSink(createFirehoseSinkFromStaticConfig(outputFirehoseStream));
     }
 
 
     LOG.info("Reading events from stream {}", parameter.get("InputStreamName", DEFAULT_STREAM_NAME));
+    LOG.info("Writing events from Firehose stream {}", parameter.get("OutputFirehoseStream", DEFAULT_STREAM_NAME));
 
     env.execute();
   }
