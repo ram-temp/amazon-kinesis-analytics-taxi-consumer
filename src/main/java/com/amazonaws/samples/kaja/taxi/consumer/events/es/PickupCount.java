@@ -15,10 +15,12 @@
 
 package com.amazonaws.samples.kaja.taxi.consumer.events.es;
 
+import java.util.UUID;
 
 public class PickupCount extends Document {
   public final String location;
   public final long pickupCount;
+  public final String uuid = UUID.randomUUID().toString();
 
   public PickupCount(String location, long pickupCount, long timestamp) {
     super(timestamp);
