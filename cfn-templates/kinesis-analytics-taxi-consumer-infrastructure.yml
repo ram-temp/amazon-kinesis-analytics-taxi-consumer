@@ -29,30 +29,141 @@ Parameters:
 Outputs:
   KinesisReplayInstance:
     Description: SSH connection to the instance that ingests trip events into the Kinesis stream
-    Value: !Sub ssh -C ec2-user@${KinesisReplayInstance.PublicDnsName}
+    Value: !Sub ssh -i ~/.ssh/${SshKeyName}.pem ec2-user@${KinesisReplayInstance.PublicDnsName}
 
   ProducerCommand:
     Description: Command to populate Kinesis stream with taxi trip events
-    Value: !Sub java -jar amazon-kinesis-replay-*.jar -streamName ${KinesisStream} -streamRegion ${AWS::Region} -aggregate -speedup 4320 -objectPrefix artifacts/kinesis-analytics-taxi-consumer/taxi-trips-partitioned.json.lz4/
-
-  KibanaDashboardURL:
-    Description: URL to access the Kibana dasboard
-    Value: !Sub https://${ElasticsearchService.DomainEndpoint}/_plugin/kibana/app/kibana#/dashboard/nyc-tlc-dashboard
+    Value: !Sub java -jar amazon-kinesis-replay-*.jar -streamName ${InputKinesisStream} -streamRegion ${AWS::Region} -aggregate -speedup 4320 -objectPrefix artifacts/kinesis-analytics-taxi-consumer/taxi-trips-partitioned.json.lz4/
 
   CloudWatchDashboardURL:
     Description: URL to access metrics in a CloudWatch dasboard
     Value: !Sub https://console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${CloudWatchDashboard}
 
+  OutputDataBucket:
+    Description: Output Data Bucket
+    Value: !Sub ${OutputDataS3Bucket}
+
+  InputDataAccumulatorBucket:
+    Description: Input Data Accumulator Bucket
+    Value: !Sub ${PersistInputS3Bucket}
+
+
 
 Resources:
-  KinesisStream:
+  InputKinesisStream:
     Type: AWS::Kinesis::Stream
     Properties:
-      ShardCount: 8
+      ShardCount: 24
+
+  OutputDataS3Bucket:
+    Type: AWS::S3::Bucket
+
+  OutputDataDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+
+  OutputDataDeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: firehose_outputdatadelivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !Sub 'arn:aws:s3:::${OutputDataS3Bucket}'
+              - !Sub 'arn:aws:s3:::${OutputDataS3Bucket}/*'
+      Roles:
+        - !Ref OutputDataDeliveryRole
+
+  OutputDataDeliveryStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamType: DirectPut
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Sub 'arn:aws:s3:::${OutputDataS3Bucket}'
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 20
+        CompressionFormat: UNCOMPRESSED
+        ErrorOutputPrefix: "myErrorPrefix/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/!{firehose:error-output-type}"
+        Prefix: "data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+        RoleARN: !GetAtt OutputDataDeliveryRole.Arn
+
+  PersistInputS3Bucket:
+    Type: AWS::S3::Bucket
+
+
+  PersistInputFirehoseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        -
+          PolicyName: root
+          PolicyDocument:
+            !Sub |
+              {
+                  "Version": "2012-10-17",
+                  "Statement": [
+                      {
+                          "Effect": "Allow",
+                          "Action": "s3:*",
+                          "Resource": [
+                              "arn:aws:s3:::${PersistInputS3Bucket}",
+                              "arn:aws:s3:::${PersistInputS3Bucket}/*"
+                          ]
+                      },
+                      {
+                          "Effect": "Allow",
+                          "Action": "kinesis:*",
+                          "Resource": "${InputKinesisStream.Arn}"
+                      }
+                  ]
+              }
+
+  PersistInputFirehoseStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      DeliveryStreamType: KinesisStreamAsSource
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Sub 'arn:aws:s3:::${PersistInputS3Bucket}'
+        BufferingHints:
+          IntervalInSeconds: 300
+          SizeInMBs: 128
+        CompressionFormat: UNCOMPRESSED
+        ErrorOutputPrefix: "myErrorPrefix/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/!{firehose:error-output-type}"
+        Prefix: "data/year=!{timestamp:yyyy}/month=!{timestamp:MM}/day=!{timestamp:dd}/hour=!{timestamp:HH}/"
+        RoleARN: !GetAtt PersistInputFirehoseRole.Arn
+      KinesisStreamSourceConfiguration:
+          KinesisStreamARN: !GetAtt InputKinesisStream.Arn
+          RoleARN: !GetAtt PersistInputFirehoseRole.Arn
 
   KinesisAnalyticsFlinkApplication:
     Type: AWS::KinesisAnalyticsV2::Application
-    Properties: 
+    Properties:
       RuntimeEnvironment: FLINK-1_8
       ServiceExecutionRole: !Sub ${KinesisAnalyticsServiceRole.Arn}
       ApplicationConfiguration:
@@ -66,9 +177,10 @@ Resources:
           PropertyGroups:
             - PropertyGroupId: FlinkApplicationProperties
               PropertyMap:
-                ElasticsearchEndpoint: !Sub https://${ElasticsearchService.DomainEndpoint}
+                ElasticsearchEndpoint: !Sub ${OutputDataDeliveryStream}
+                OutputFirehoseStream: !Sub ${OutputDataDeliveryStream}
                 EventTime: true
-                InputStreamName: !Sub ${KinesisStream}
+                InputStreamName: !Sub ${InputKinesisStream}
                 Region: !Sub ${AWS::Region}
         FlinkApplicationConfiguration:
           MonitoringConfiguration:
@@ -83,60 +195,18 @@ Resources:
     Type: "AWS::KinesisAnalyticsV2::ApplicationCloudWatchLoggingOption"
     Properties:
       ApplicationName: !Sub ${KinesisAnalyticsFlinkApplication}
-      CloudWatchLoggingOption: 
+      CloudWatchLoggingOption:
         LogStreamARN: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:${FlinkLogGroup}:log-stream:${FlinkLogStream}
 
   FlinkLogGroup:
     Type: AWS::Logs::LogGroup
-    Properties: 
+    Properties:
       RetentionInDays: 7
 
   FlinkLogStream:
     Type: AWS::Logs::LogStream
-    Properties: 
-      LogGroupName: !Ref FlinkLogGroup
-
-
-  ElasticsearchService:
-    Type: AWS::Elasticsearch::Domain
     Properties:
-      AccessPolicies:
-        !Sub |
-          {
-            "Version": "2012-10-17",
-            "Statement": [
-              {
-                "Effect": "Allow",
-                "Principal": {
-                  "AWS": "*"
-                },
-                "Action": [
-                  "es:ESHttpGet",
-                  "es:ESHttpPut",
-                  "es:ESHttpPost",
-                  "es:ESHttpHead",
-                  "es:ESHttpDelete"
-                ],
-                "Resource": "*",
-                "Condition": {
-                  "IpAddress": {
-                    "aws:SourceIp": [
-                      "${ClientIpAddressRange}",
-                      "${KinesisReplayInstanceIp}"
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-      ElasticsearchClusterConfig:
-        InstanceCount: 1
-        InstanceType: m4.large.elasticsearch
-      EBSOptions:
-        EBSEnabled: true
-        VolumeSize: 20
-        VolumeType: gp2
-      ElasticsearchVersion: 6.4
+      LogGroupName: !Ref FlinkLogGroup
 
 
   FlinkNotProcessingFromKinesisAlarm:
@@ -147,7 +217,7 @@ Resources:
       MetricName: millisBehindLatest
       Dimensions:
         - Name: Id
-          Value: !Join ["_", !Split ["-", !Ref KinesisStream]]
+          Value: !Join ["_", !Split ["-", !Ref InputKinesisStream]]
         - Name: Application
           Value: !Sub ${KinesisAnalyticsFlinkApplication}
         - Name: Flow
@@ -164,7 +234,7 @@ Resources:
     Type: AWS::CloudWatch::Dashboard
     Properties:
       DashboardName: !Sub ${AWS::StackName}-dashboard
-      DashboardBody: !Sub 
+      DashboardBody: !Sub
         - |
           {
               "widgets": [
@@ -179,7 +249,7 @@ Resources:
                           "stacked": false,
                           "metrics": [
                               [ "AWS/EC2", "CPUUtilization", "InstanceId", "${KinesisReplayInstance}" ],
-                              [ "AWS/Kinesis", "IncomingRecords", "StreamName", "${KinesisStream}", { "yAxis": "right", "stat": "Sum" } ]
+                              [ "AWS/Kinesis", "IncomingRecords", "StreamName", "${InputKinesisStream}", { "yAxis": "right", "stat": "Sum" } ]
                           ],
                           "region": "${AWS::Region}",
                           "period": 60,
@@ -199,7 +269,7 @@ Resources:
                       "height": 6,
                       "properties": {
                           "metrics": [
-                              [ "KinesisProducerLibrary", "UserRecordsPut", "StreamName", "${KinesisStream}" ],
+                              [ "KinesisProducerLibrary", "UserRecordsPut", "StreamName", "${InputKinesisStream}" ],
                               [ ".", "KinesisRecordsPut", ".", "." ],
                               [ "AWS/Kinesis", "IncomingBytes", ".", ".", { "yAxis": "right" } ]
                           ],
@@ -219,7 +289,7 @@ Resources:
                       "height": 6,
                       "properties": {
                           "metrics": [
-                              [ "AWS/Kinesis", "ReadProvisionedThroughputExceeded", "StreamName", "${KinesisStream}" ],
+                              [ "AWS/Kinesis", "ReadProvisionedThroughputExceeded", "StreamName", "${InputKinesisStream}" ],
                               [ ".", "WriteProvisionedThroughputExceeded", ".", ".", { "yAxis": "right" } ]
                           ],
                           "view": "timeSeries",
@@ -238,7 +308,7 @@ Resources:
                       "height": 6,
                       "properties": {
                           "metrics": [
-                              [ "AWS/Kinesis", "GetRecords.Bytes", "StreamName", "${KinesisStream}" ],
+                              [ "AWS/Kinesis", "GetRecords.Bytes", "StreamName", "${InputKinesisStream}" ],
                               [ "AWS/KinesisAnalytics", "millisBehindLatest", "Id", "${KinesisStreamNameUnderscore}", "Application", "${KinesisAnalyticsFlinkApplication}", "Flow", "Input", { "yAxis": "right", "stat": "Maximum" } ]
                           ],
                           "view": "timeSeries",
@@ -247,33 +317,6 @@ Resources:
                           "stat": "Sum",
                           "title": "Kinesis Analytics Application Metrics",
                           "period": 60
-                      }
-                  },
-                  {
-                      "type": "metric",
-                      "x": 0,
-                      "y": 18,
-                      "width": 21,
-                      "height": 6,
-                      "properties": {
-                          "view": "timeSeries",
-                          "stacked": false,
-                          "metrics": [
-                              [ "AWS/ES", "SearchableDocuments", "DomainName", "${ElasticsearchService}", "ClientId", "${AWS::AccountId}" ],
-                              [ ".", "CPUUtilization", ".", ".", ".", ".", { "yAxis": "right" } ]
-                          ],
-                          "region": "${AWS::Region}",
-                          "period": 60,
-                          "title": "Elasticsearch Metrics",
-                          "yAxis": {
-                              "left": {
-                                  "min": 0
-                              },
-                              "right": {
-                                  "min": 0,
-                                  "max": 100
-                              }
-                          }
                       }
                   },
                   {
@@ -290,7 +333,7 @@ Resources:
                   }
               ]
           }
-        - { KinesisStreamNameUnderscore: !Join ["_", !Split ["-", !Ref KinesisStream]] }
+        - { KinesisStreamNameUnderscore: !Join ["_", !Split ["-", !Ref InputKinesisStream]] }
 
 
   KinesisReplayInstance:
@@ -320,7 +363,7 @@ Resources:
         Fn::Base64:
           !Sub |
             #!/bin/bash -x
-            
+
             yum update -y
             yum install -y tmux
 
@@ -331,16 +374,6 @@ Resources:
             # wait until CF stack, in particular the EIP association, was created successfully
             aws --region ${AWS::Region} cloudformation wait stack-create-complete --stack-name '${AWS::StackName}'
 
-            # create ES indices
-            curl -s https://raw.githubusercontent.com/aws-samples/amazon-kinesis-analytics-taxi-consumer/master/misc/trip-duration-index.json | curl -s -w "\n" -XPUT https://${ElasticsearchService.DomainEndpoint}/trip_duration -H "Content-Type: application/json" -d @-
-            curl -s https://raw.githubusercontent.com/aws-samples/amazon-kinesis-analytics-taxi-consumer/master/misc/pickup-count-index.json | curl -s -w "\n" -XPUT https://${ElasticsearchService.DomainEndpoint}/pickup_count -H "Content-Type: application/json" -d @-
-
-            # create Kinaba visualizations and dashboard
-            curl -s https://raw.githubusercontent.com/aws-samples/amazon-kinesis-analytics-taxi-consumer/master/misc/nyc-tlc-dashboard.json | curl -s -w "\n" -XPOST https://${ElasticsearchService.DomainEndpoint}/_plugin/kibana/api/saved_objects/_bulk_create -H 'Content-Type: application/json' -H 'kbn-xsrf: true' -d @-
-
-            # set default Kibana index pattern
-            curl -s -w "\n" -XPOST 'https://${ElasticsearchService.DomainEndpoint}/_plugin/kibana/api/kibana/settings' -H 'content-type: application/json' -H 'kbn-xsrf: true' --data '{"changes":{"defaultIndex":"trip-duration-index-pattern"}}'
-            
             # start the Flink application
             aws --region ${AWS::Region} kinesisanalyticsv2 start-application --application-name ${KinesisAnalyticsFlinkApplication} --run-configuration '{ "ApplicationRestoreConfiguration": { "ApplicationRestoreType": "RESTORE_FROM_LATEST_SNAPSHOT" } }'
 
@@ -415,7 +448,7 @@ Resources:
                           "kinesis:PutRecord",
                           "kinesis:PutRecords"
                       ],
-                      "Resource": "${KinesisStream.Arn}"
+                      "Resource": "${InputKinesisStream.Arn}"
                   },
                   {
                       "Effect": "Allow",
@@ -498,28 +531,13 @@ Resources:
                       {
                           "Effect": "Allow",
                           "Action": "kinesis:*",
-                          "Resource": "${KinesisStream.Arn}"
+                          "Resource": "${InputKinesisStream.Arn}"
                       },
                       {
+                          "Sid": "WriteDeliveryStream",
                           "Effect": "Allow",
-                          "Action": [
-                            "es:ESHttpPut",
-                            "es:ESHttpPost",
-                            "es:ESHttpHead"
-                          ],
-                          "Resource": "${ElasticsearchService.Arn}/*"
-                      },
-                      {
-                              "Sid": "WriteObjects",
-                              "Effect": "Allow",
-                              "Action": [
-                                  "s3:ListBucket",
-                                  "s3:PutObject"
-                              ],
-                              "Resource": [
-                                  "arn:aws:s3:::ka-app-ramvasi",
-                                  "arn:aws:s3:::ka-app-ramvasi/*"
-                              ]
+                          "Action": "firehose:*",
+                          "Resource": "${OutputDataDeliveryStream.Arn}"
                       }
                   ]
               }

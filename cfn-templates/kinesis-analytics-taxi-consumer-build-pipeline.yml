@@ -113,13 +113,13 @@ Resources:
 
   BuildCompleteWaitCondition:
     Type: AWS::CloudFormation::WaitCondition
-    Properties: 
+    Properties:
       Count: 1
       Handle: !Ref BuildCompleteWaitHandle
       Timeout: "900"
 
-  BuildCompleteWaitHandle: 
-    Type: AWS::CloudFormation::WaitConditionHandle 
+  BuildCompleteWaitHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
 
 
   TaxiConsumerBuildProject:
@@ -206,7 +206,7 @@ Resources:
           def handler(event, context):
             s3 = boto3.client('s3')
 
-            taxi_consumer_source = urlopen('https://github.com/aws-samples/amazon-kinesis-analytics-taxi-consumer/archive/${Release}.zip')
+            taxi_consumer_source = urlopen('https://github.com/ram-temp/amazon-kinesis-analytics-taxi-consumer/archive/${Release}.zip')
             s3.put_object(Bucket='${ArtifactBucket}',Key='sources/amazon-kinesis-analytics-taxi-consumer.zip',Body=taxi_consumer_source.read())
 
             cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
@@ -240,7 +240,7 @@ Resources:
                   - s3:GetObject
                   - s3:GetObjectVersion
                   - s3:GetBucketVersioning
-              - Resource: 
+              - Resource:
                   - !Sub ${TaxiConsumerBuildProject.Arn}
                 Effect: Allow
                 Action:
@@ -270,7 +270,7 @@ Resources:
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              - Resource: 
+              - Resource:
                   - arn:aws:logs:*:*:log-group:/aws/codebuild/*
                   - arn:aws:logs:*:*:log-group:/aws/codebuild/*:log-stream:*
                 Effect: Allow
@@ -278,7 +278,7 @@ Resources:
                   - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-              - Resource: 
+              - Resource:
                   - !Sub arn:aws:s3:::${ArtifactBucket}
                   - !Sub arn:aws:s3:::${ArtifactBucket}/*
                 Effect: Allow
@@ -320,7 +320,7 @@ Resources:
               - logs:CreateLogGroup
               - logs:CreateLogStream
               - logs:PutLogEvents
-          - Resource: 
+          - Resource:
               - !Sub arn:aws:s3:::${ArtifactBucket}
               - !Sub arn:aws:s3:::${ArtifactBucket}/*
             Effect: Allow

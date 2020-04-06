@@ -1,0 +1,13 @@
+{
+    "fileLocations": [
+        {
+            "URIPrefixes": [
+                "s3://kda-5apr-v2-taxiconsumerinfras-outputdatas3bucket-1a2ax4lty3fnf/data/"
+            ]
+        }
+    ],
+    "globalUploadSettings": {
+        "format": "JSON",
+        "containsHeader": false
+    }
+}

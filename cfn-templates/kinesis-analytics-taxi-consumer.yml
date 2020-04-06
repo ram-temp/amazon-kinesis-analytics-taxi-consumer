@@ -3,6 +3,10 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: Builds and runs the kinesis-analytics-taxi-consumer Flink application in a fully managed environment using Amazon Kinesis Data Analytics for Java Applications (amazon-kinesis-analytics-taxi-consumer)
 
 Parameters:
+  TemplateBucket:
+    Description: Bucket containing the CloudFormation templates
+    Type: String
+
   SshKeyName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the EC2 instance for replaying events
     ConstraintDescription: MuSt be the name of an existing EC2 KeyPair
@@ -26,42 +30,47 @@ Outputs:
     Description: Command to populate Kinesis stream with taxi trip events
     Value: !GetAtt TaxiConsumerInfrastructure.Outputs.ProducerCommand
 
-  KibanaDashboardURL:
-    Description: URL to access the Kibana dasboard
-    Value: !GetAtt TaxiConsumerInfrastructure.Outputs.KibanaDashboardURL
-
   CloudWatchDashboardURL:
     Description: URL to access metrics in a CloudWatch dasboard
     Value: !GetAtt TaxiConsumerInfrastructure.Outputs.CloudWatchDashboardURL
+
+  OutputDataBucket:
+    Description: Output Data Bucket
+    Value: !GetAtt TaxiConsumerInfrastructure.Outputs.OutputDataBucket
+
+  InputDataAccumulatorBucket:
+    Description: Input Data Accumulator Bucket
+    Value: !GetAtt TaxiConsumerInfrastructure.Outputs.InputDataAccumulatorBucket
+
 
 
 Resources:
   KinesisReplayBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-replay-build-pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/kinesis-replay-build-pipeline.yml
       Parameters:
         ExternalArtifactBucket: !Ref ArtifactBucket
         Release: release-0.1.0
-  
+
   FlinkKinesisConnectorBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/flink-kinesis-connector-build-pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/flink-kinesis-connector-build-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
   TaxiConsumerBuildStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-analytics-taxi-consumer-build-pipeline.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/kinesis-analytics-taxi-consumer-build-pipeline.yml
       Parameters:
         ArtifactBucket: !Ref ArtifactBucket
 
   TaxiConsumerInfrastructure:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: https://ka-app-ramvasi.s3.amazonaws.com/kinesis-analytics-taxi-consumer-infrastructure.yml
+      TemplateURL: !Sub https://${TemplateBucket}.s3.amazonaws.com/kinesis-analytics-taxi-consumer-infrastructure.yml
       Parameters:
         KinesisReplayCopyCommand: !GetAtt KinesisReplayBuildStack.Outputs.KinesisReplayCopyCommand
         FlinkApplicationS3BucketArn: !GetAtt ArtifactBucket.Arn
@@ -74,4 +83,3 @@ Resources:
     Properties:
       VersioningConfiguration:
         Status: Enabled
-
