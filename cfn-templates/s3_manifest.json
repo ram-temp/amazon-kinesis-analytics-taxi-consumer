@@ -2,7 +2,7 @@
     "fileLocations": [
         {
             "URIPrefixes": [
-                "s3://kda-5apr-v2-taxiconsumerinfras-outputdatas3bucket-1a2ax4lty3fnf/data/"
+                "s3://apr7-final-kinesisanalyticsaws-outputdatas3bucket-1ocmf6yhiivxp/data"
             ]
         }
     ],
